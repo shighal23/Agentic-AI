@@ -1,16 +1,88 @@
-from openai import OpenAI
+import os
 import sys
 import traceback
-from Config import API_KEY, BASE_URL, MODEL_NAME
+from openai import OpenAI
+import requests
 
-client = OpenAI(
-    api_key=API_KEY,
-    base_url=BASE_URL if BASE_URL else None,
-)
 
 def _log(msg: str) -> None:
     # Print to stderr so Streamlit captures it in logs without exposing secrets
     print(f"[LLM] {msg}", file=sys.stderr)
+
+
+# Try to import config; if it fails (Config may raise on missing key),
+# perform a masked diagnostic by reading env and Streamlit secrets directly.
+try:
+    from Config import API_KEY, BASE_URL, MODEL_NAME
+    _from_config = True
+except Exception as import_exc:
+    _log("Config import failed — falling back to masked diagnostics.")
+    # Attempt to read key from environment or Streamlit secrets without exposing it
+    API_KEY = os.getenv("OPENAI_API_KEY") or ""
+    try:
+        import streamlit as _st
+        if not API_KEY:
+            API_KEY = _st.secrets.get("OPENAI_API_KEY") or ""
+        BASE_URL = os.getenv("BASE_URL") or _st.secrets.get("BASE_URL") or ""
+        MODEL_NAME = os.getenv("MODEL_NAME") or _st.secrets.get("MODEL_NAME") or ""
+    except Exception:
+        # Streamlit not available in this context; just use env-derived values
+        BASE_URL = os.getenv("BASE_URL") or ""
+        MODEL_NAME = os.getenv("MODEL_NAME") or ""
+    _from_config = False
+
+
+def _mask_diagnostics(key: str, base_url: str) -> None:
+    present = bool(key)
+    looks_like_openai = bool(key and key.startswith("sk-"))
+    _log(f"Masked diagnostic — OPENAI_API_KEY present: {'Yes' if present else 'No'}; "
+         f"Looks like OpenAI key: {'Yes' if looks_like_openai else 'No'}; "
+         f"BASE_URL set: {'Yes' if base_url else 'No'}")
+
+
+# Run masked diagnostics so it's visible in Streamlit logs without showing the key
+_mask_diagnostics(API_KEY, BASE_URL)
+
+
+def _auth_check(key: str, base_url: str) -> None:
+    """Perform a single masked HTTP request to check authentication status.
+
+    Logs only the HTTP status and a short, non-sensitive snippet of the response.
+    Does not log the API key itself.
+    """
+    if not key:
+        _log("Auth check skipped: no API key present.")
+        return
+
+    # Build endpoint — prefer explicit BASE_URL if provided, otherwise OpenAI
+    if base_url:
+        endpoint = base_url.rstrip("/")
+        # If user provided a base like https://api.provider.com, append /v1/models
+        if not endpoint.endswith("/v1/models"):
+            endpoint = endpoint + "/v1/models"
+    else:
+        endpoint = "https://api.openai.com/v1/models"
+
+    headers = {"Authorization": f"Bearer {key}"}
+    try:
+        resp = requests.get(endpoint, headers=headers, timeout=10)
+        status = resp.status_code
+        # Keep only a short snippet of the body for logs
+        snippet = (resp.text or "").replace("\n", " ")[:400]
+        _log(f"Auth check to {endpoint} returned status={status}; resp_snippet='{snippet}'")
+    except Exception as e:
+        _log(f"Auth check request failed: {e}")
+
+
+# Run an auth check once at import to help debug deployed auth issues.
+_auth_check(API_KEY, BASE_URL)
+
+
+# Create OpenAI client (if no API key, client creation will likely fail downstream)
+client = OpenAI(
+    api_key=API_KEY or None,
+    base_url=BASE_URL if BASE_URL else None,
+)
 
 
 def chat(messages: list) -> str:
