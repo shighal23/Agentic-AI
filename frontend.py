@@ -1,6 +1,7 @@
 import os
 import streamlit as st
-from agent import Agent
+import os
+import streamlit as st
 
 st.set_page_config(
     page_title="AI Agent",
@@ -11,8 +12,17 @@ st.set_page_config(
 st.title("🤖 AI Agent")
 
 # Create agent only once
+# Create agent only once (lazy import to avoid import-time failures)
 if "agent" not in st.session_state:
-    st.session_state.agent = Agent()
+    try:
+        from agent import Agent
+        st.session_state.agent = Agent()
+    except Exception as e:
+        # Show a friendly error and log the traceback to stderr (Streamlit logs)
+        st.error("Failed to initialize Agent; see app logs for details.")
+        import traceback as _tb
+        _tb.print_exc()
+        st.session_state.agent = None
 
 # Chat history
 if "messages" not in st.session_state:
@@ -39,12 +49,16 @@ if prompt:
     # Get AI response (guard errors to avoid full app crash)
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            try:
-                response = st.session_state.agent.run(prompt)
-            except RuntimeError as e:
-                # Show a friendly error message (do not reveal secrets)
-                st.error(str(e))
-                response = None
+            response = None
+            if not st.session_state.get("agent"):
+                st.error("Agent not available. Check app logs for initialization errors.")
+            else:
+                try:
+                    response = st.session_state.agent.run(prompt)
+                except RuntimeError as e:
+                    # Show a friendly error message (do not reveal secrets)
+                    st.error(str(e))
+                    response = None
 
         if response:
             st.markdown(response)
