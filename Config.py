@@ -1,5 +1,6 @@
-API_KEY = "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"
+import os
 
-BASE_URL = "https://api.groq.com/openai/v1"
+API_KEY = os.getenv("OPENAI_API_KEY", "NU7ntP7psr76QcHeWODG0DPBxdDwb5jF")
 
-MODEL_NAME = "llama-3.3-70b-versatile"
+BASE_URL = os.getenv("BASE_URL", "https://api.groq.com/openai/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
